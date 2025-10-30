@@ -20,6 +20,7 @@ import { CustomCursor } from '../../components/CustomCursor';
 import { ParticleBackground } from '../../components/ParticleBackground';
 import { GlassCard } from '../../components/GlassCard';
 import { FlipCard } from '../../components/FlipCard';
+import { applicationsAPI } from '../../lib/api';
 
 ChartJS.register(
   CategoryScale,
@@ -35,35 +36,156 @@ ChartJS.register(
 
 export default function Dashboard() {
   const [timeRange, setTimeRange] = useState('30');
+  const [loading, setLoading] = useState(true);
+  const [applications, setApplications] = useState<any[]>([]);
   const [stats, setStats] = useState({
-    totalApplications: 47,
-    weeklyApplications: 12,
-    averageTimePerApp: 25,
-    responseRate: 18.5,
-    responsesReceived: 8,
-    currentStreak: 5,
-    longestStreak: 12,
+    totalApplications: 0,
+    weeklyApplications: 0,
+    lastWeekApplications: 0,
+    monthlyApplications: 0,
+    avgApplicationsPerDay: 0,
+    interviews: 0,
+    offers: 0,
+    pending: 0,
+    averageTimePerApp: 0,
+    fastestTime: 0,
+    slowestTime: 0,
+    targetTime: 20,
+    improvement: 0,
+    responseRate: 0,
+    responsesReceived: 0,
+    currentStreak: 0,
+    longestStreak: 0,
     weeklyGoal: 15,
-    weeklyAchievement: 80,
-    coldEmailsSent: 23,
-    coldEmailResponses: 4,
-    coldEmailConversionRate: 17.4,
-    bestDayOfWeek: 'Tuesday',
-    bestTimeOfDay: '10:00 AM',
-    averageResponseTime: 3.2,
-    cvVersionPerformance: [
-      { name: 'Tech-focused CV v2.1', applications: 15, interviews: 4, conversionRate: 26.7 },
-      { name: 'General CV v1.8', applications: 20, interviews: 3, conversionRate: 15.0 },
-      { name: 'Startup CV v1.2', applications: 12, interviews: 1, conversionRate: 8.3 }
-    ]
+    weeklyAchievement: 0,
+    coldEmailsSent: 0,
+    coldEmailResponses: 0,
+    coldEmailConversionRate: 0,
+    bestDayOfWeek: 'N/A',
+    bestTimeOfDay: 'N/A',
+    averageResponseTime: 0,
+    cvVersionPerformance: [] as Array<{ name: string; conversionRate: number; interviews: number; applications: number }>
   });
 
-  // Chart data
+  const [chartData, setChartData] = useState({
+    lineChart: {
+      labels: [] as string[],
+      data: [] as number[],
+    },
+    statusChart: {} as Record<string, number>,
+    sourceChart: {} as Record<string, number>,
+  });
+
+  const [sourcePerformance, setSourcePerformance] = useState<Array<{
+    source: string;
+    count: number;
+    conversionRate: number;
+    avgResponseTime: number;
+  }>>([]);
+
+  // Fetch real data from backend
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        
+        // Fetch applications and stats
+        const [applicationsData, statsData] = await Promise.all([
+          applicationsAPI.getAll({ limit: 100 }),
+          applicationsAPI.getStats(parseInt(timeRange)),
+        ]);
+
+        setApplications(applicationsData.applications || []);
+        
+        // Process stats
+        const apps = applicationsData.applications || [];
+        const byStatus = statsData.byStatus || {};
+        
+        // Group applications by date for trend chart
+        const dateGroups = apps.reduce((acc: any, app: any) => {
+          const date = new Date(app.applied_at || app.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          acc[date] = (acc[date] || 0) + 1;
+          return acc;
+        }, {});
+
+        // Group by source
+        const sourceGroups = apps.reduce((acc: any, app: any) => {
+          const source = app.job_board_source || 'Unknown';
+          acc[source] = (acc[source] || 0) + 1;
+          return acc;
+        }, {});
+
+        // Enhanced source chart with performance data from backend
+        const sourcePerf = (statsData.sourcePerformance || []).map((source: any) => ({
+          source: source.source,
+          count: source.count,
+          conversionRate: source.conversionRate,
+          avgResponseTime: source.avgResponseTime,
+        }));
+
+        const sourceChartEnhanced = sourcePerf.reduce((acc: any, source: any) => {
+          acc[source.source] = source.count;
+          return acc;
+        }, {});
+
+        setSourcePerformance(sourcePerf);
+
+        setChartData({
+          lineChart: {
+            labels: Object.keys(dateGroups).slice(-7),
+            data: Object.values(dateGroups).slice(-7) as number[],
+          },
+          statusChart: byStatus,
+          sourceChart: Object.keys(sourceChartEnhanced).length > 0 ? sourceChartEnhanced : sourceGroups,
+        });
+
+        setStats({
+          totalApplications: statsData.total || 0,
+          weeklyApplications: statsData.weeklyApplications || 0,
+          lastWeekApplications: statsData.lastWeekApplications || 0,
+          monthlyApplications: statsData.monthlyApplications || 0,
+          avgApplicationsPerDay: statsData.avgApplicationsPerDay || 0,
+          interviews: statsData.interviews || 0,
+          offers: statsData.offers || 0,
+          pending: statsData.pending || 0,
+          averageTimePerApp: Math.round(statsData.averageTimePerApplication || 0),
+          fastestTime: Math.round(statsData.fastestTime || 0),
+          slowestTime: Math.round(statsData.slowestTime || 0),
+          targetTime: statsData.targetTime || 20,
+          improvement: statsData.improvement || 0,
+          responseRate: Math.round(statsData.responseRate || 0),
+          responsesReceived: statsData.responsesReceived || 0,
+          currentStreak: statsData.currentStreak || 0,
+          longestStreak: statsData.longestStreak || 0,
+          weeklyGoal: statsData.weeklyGoal || 15,
+          weeklyAchievement: Math.round(statsData.weeklyAchievement || 0),
+          coldEmailsSent: statsData.coldEmailsSent || 0,
+          coldEmailResponses: statsData.coldEmailResponses || 0,
+          coldEmailConversionRate: Math.round(statsData.coldEmailConversionRate || 0),
+          bestDayOfWeek: statsData.bestDayOfWeek || 'N/A',
+          bestTimeOfDay: statsData.bestTimeOfDay || 'N/A',
+          averageResponseTime: Math.round(statsData.averageResponseTime || 0),
+          cvVersionPerformance: [],
+        });
+
+        toast.success('Dashboard data loaded!');
+      } catch (error: any) {
+        console.error('Error fetching dashboard data:', error);
+        toast.error('Failed to load dashboard data: ' + error.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [timeRange]);
+
+  // Chart data using real data
   const lineChartData = {
-    labels: ['19 Jan', '20 Jan', '21 Jan', '22 Jan', '23 Jan', '24 Jan', '25 Jan'],
+    labels: chartData.lineChart.labels.length > 0 ? chartData.lineChart.labels : ['No data yet'],
     datasets: [{
       label: 'Applications',
-      data: [3, 5, 2, 6, 3, 7, 4],
+      data: chartData.lineChart.data.length > 0 ? chartData.lineChart.data : [0],
       borderColor: '#000000',
       backgroundColor: 'rgba(0, 0, 0, 0.1)',
       tension: 0.4,
@@ -71,21 +193,36 @@ export default function Dashboard() {
   };
 
   const statusChartData = {
-    labels: ['Applied', 'Viewed', 'Shortlisted', 'Interviewed', 'Offered', 'Rejected'],
+    labels: Object.keys(chartData.statusChart).length > 0 ? Object.keys(chartData.statusChart) : ['No data'],
     datasets: [{
-      data: [47, 28, 12, 8, 3, 15],
+      data: Object.keys(chartData.statusChart).length > 0 ? Object.values(chartData.statusChart) : [1],
       backgroundColor: ['#000000', '#333333', '#666666', '#999999', '#cccccc', '#e5e5e5'],
     }]
   };
 
   const sourceBarData = {
-    labels: ['LinkedIn', 'Indeed', 'Company Sites', 'Referrals', 'Recruiters'],
+    labels: Object.keys(chartData.sourceChart).length > 0 ? Object.keys(chartData.sourceChart) : ['No data'],
     datasets: [{
       label: 'Applications',
-      data: [15, 12, 8, 7, 5],
+      data: Object.keys(chartData.sourceChart).length > 0 ? Object.values(chartData.sourceChart) : [1],
       backgroundColor: '#000000',
     }]
   };
+
+  if (loading) {
+    return (
+      <>
+        <CustomCursor />
+        <ParticleBackground />
+        <div className="min-h-screen bg-white flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-16 h-16 border-4 border-black border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+            <p className="text-xl font-semibold text-black">Loading your dashboard...</p>
+          </div>
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
@@ -111,16 +248,16 @@ export default function Dashboard() {
                   Dashboard
                 </button>
                 <button 
-                  onClick={() => window.location.href = '/services'}
-                  className="px-4 py-2 text-gray-700 hover:text-black font-medium transition"
-                >
-                  Services
-                </button>
-                <button
-                  onClick={() => toast('Applications page coming soon')}
+                  onClick={() => window.location.href = '/dashboard/applications'}
                   className="px-4 py-2 text-gray-700 hover:text-black font-medium transition"
                 >
                   Applications
+                </button>
+                <button 
+                  onClick={() => window.location.href = '/dashboard/cold-emails'}
+                  className="px-4 py-2 text-gray-700 hover:text-black font-medium transition"
+                >
+                  Cold Emails
                 </button>
               </div>
             </div>
@@ -192,13 +329,13 @@ export default function Dashboard() {
               value={stats.totalApplications}
               subtitle={`${stats.weeklyApplications} this week`}
               icon="📊"
-              trend={stats.weeklyApplications}
-              trendPositive={true}
+              trend={stats.lastWeekApplications > 0 ? Math.round(((stats.weeklyApplications - stats.lastWeekApplications) / stats.lastWeekApplications) * 100) : 0}
+              trendPositive={stats.weeklyApplications >= stats.lastWeekApplications}
               detailedStats={{
                 thisWeek: stats.weeklyApplications,
-                lastWeek: 8,
-                thisMonth: 47,
-                avgPerDay: 1.6
+                lastWeek: stats.lastWeekApplications,
+                thisMonth: stats.monthlyApplications,
+                avgPerDay: stats.avgApplicationsPerDay
               }}
             />
             
@@ -207,13 +344,13 @@ export default function Dashboard() {
               value={`${stats.averageTimePerApp}m`}
               subtitle="Efficiency metric"
               icon="⏱️"
-              trend={5}
-              trendPositive={false}
+              trend={Math.abs(stats.improvement)}
+              trendPositive={stats.improvement > 0}
               detailedStats={{
-                fastest: '12m',
-                slowest: '45m',
-                target: '20m',
-                improvement: '+15%'
+                fastest: stats.fastestTime > 0 ? `${stats.fastestTime}m` : 'N/A',
+                slowest: stats.slowestTime > 0 ? `${stats.slowestTime}m` : 'N/A',
+                target: `${stats.targetTime}m`,
+                improvement: stats.improvement !== 0 ? `${stats.improvement > 0 ? '+' : ''}${stats.improvement}%` : '0%'
               }}
             />
             
@@ -222,13 +359,13 @@ export default function Dashboard() {
               value={`${stats.responseRate.toFixed(1)}%`}
               subtitle={`${stats.responsesReceived} responses`}
               icon="📧"
-              trend={stats.responseRate > 15 ? 8 : -3}
-              trendPositive={stats.responseRate > 15}
+              trend={Math.round(stats.responseRate)}
+              trendPositive={stats.responseRate >= 15}
               detailedStats={{
                 responses: stats.responsesReceived,
-                interviews: 3,
-                offers: 1,
-                pending: 12
+                interviews: stats.interviews,
+                offers: stats.offers,
+                pending: stats.pending
               }}
             />
             
@@ -238,12 +375,12 @@ export default function Dashboard() {
               subtitle={`Best: ${stats.longestStreak} days`}
               icon="🔥"
               trend={stats.currentStreak}
-              trendPositive={true}
+              trendPositive={stats.currentStreak > 0}
               detailedStats={{
                 current: stats.currentStreak,
                 longest: stats.longestStreak,
-                thisMonth: 15,
-                goal: 30
+                thisMonth: stats.monthlyApplications,
+                weeklyGoal: stats.weeklyGoal
               }}
             />
           </motion.div>
@@ -348,31 +485,65 @@ export default function Dashboard() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8" style={{ minHeight: '350px' }}>
             <GlassCard className="p-6 h-full" depth="medium">
               <h3 className="text-2xl font-bold text-black mb-4">Performance by Job Board</h3>
-              <div style={{ height: '250px' }}>
-                <Bar 
-                  data={sourceBarData}
-                  options={{
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                      legend: { display: false },
-                      tooltip: {
-                        backgroundColor: 'rgba(0, 0, 0, 0.9)',
-                        padding: 12,
-                      }
-                    },
-                    scales: {
-                      y: {
-                        beginAtZero: true,
-                        grid: { color: 'rgba(0, 0, 0, 0.05)' }
+              {sourcePerformance.length > 0 ? (
+                <div className="space-y-3 max-h-80 overflow-y-auto">
+                  {sourcePerformance.map((source, idx) => (
+                    <motion.div
+                      key={idx}
+                      className="p-4 bg-gray-50 rounded-lg border-2 border-gray-200"
+                      whileHover={{ scale: 1.02, borderColor: '#000000' }}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: idx * 0.1 }}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-bold text-lg text-black">{source.source}</span>
+                        <span className="text-sm text-gray-600">{source.count} apps</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3 mt-3">
+                        <div>
+                          <div className="text-xs text-gray-600 mb-1">Conversion Rate</div>
+                          <div className="text-lg font-semibold text-black">
+                            {source.conversionRate.toFixed(1)}%
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-600 mb-1">Avg Response Time</div>
+                          <div className="text-lg font-semibold text-black">
+                            {source.avgResponseTime > 0 ? source.avgResponseTime.toFixed(1) : 'N/A'} days
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ height: '250px' }}>
+                  <Bar 
+                    data={sourceBarData}
+                    options={{
+                      responsive: true,
+                      maintainAspectRatio: false,
+                      plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                          backgroundColor: 'rgba(0, 0, 0, 0.9)',
+                          padding: 12,
+                        }
                       },
-                      x: {
-                        grid: { display: false }
+                      scales: {
+                        y: {
+                          beginAtZero: true,
+                          grid: { color: 'rgba(0, 0, 0, 0.05)' }
+                        },
+                        x: {
+                          grid: { display: false }
+                        }
                       }
-                    }
-                  }}
-                />
-              </div>
+                    }}
+                  />
+                </div>
+              )}
             </GlassCard>
 
             {/* Cold Email Metrics */}

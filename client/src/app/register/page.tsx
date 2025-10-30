@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { CustomCursor } from '../../components/CustomCursor';
 import { ParticleBackground } from '../../components/ParticleBackground';
+import { authAPI } from '../../lib/api';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -37,42 +38,22 @@ export default function RegisterPage() {
     setIsLoading(true);
 
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/register`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email: formData.email,
-          password: formData.password,
-          firstName: formData.firstName,
-          lastName: formData.lastName,
-          consentTracking: formData.consentTracking,
-          consentAnalytics: formData.consentAnalytics,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('user', JSON.stringify(data.user));
-        toast.success('Account created successfully!');
-        router.push('/dashboard');
-      } else {
-        toast.error(data.message || 'Registration failed');
-      }
-    } catch (error) {
-      // For demo purposes, allow mock registration
-      localStorage.setItem('token', 'mock-token');
-      localStorage.setItem('user', JSON.stringify({
-        id: 'new-user',
+      const data = await authAPI.register({
         email: formData.email,
+        password: formData.password,
         firstName: formData.firstName,
         lastName: formData.lastName,
-      }));
-      toast.success('Account created! (Demo Mode)');
+      });
+      
+      // Store token and user data
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      
+      toast.success('Account created successfully! 🎉');
       router.push('/dashboard');
+    } catch (error: any) {
+      console.error('Registration error:', error);
+      toast.error(error.message || 'Registration failed. Please try again.');
     } finally {
       setIsLoading(false);
     }

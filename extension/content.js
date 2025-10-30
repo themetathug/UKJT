@@ -1,34 +1,14 @@
 // Content script for UK Jobs Insider Job Tracker
-// Automatically captures job application details from job boards
-
-interface JobDetails {
-  company: string;
-  position: string;
-  location?: string;
-  salary?: string;
-  jobUrl: string;
-  jobBoardSource: string;
-  description?: string;
-  requirements?: string[];
-  captureMethod: 'EXTENSION';
-  confidence: number;
-  timestamp: Date;
-}
-
-interface CaptureResult {
-  success: boolean;
-  data?: JobDetails;
-  error?: string;
-}
+// Plain JavaScript (no TypeScript syntax) for Chrome content scripts
 
 // Site-specific selectors for job boards
 const SITE_SELECTORS = {
   'linkedin.com': {
-    company: '.job-details-jobs-unified-top-card__company-name a, .topcard__org-name-link',
-    position: '.job-details-jobs-unified-top-card__job-title h1, .topcard__title',
-    location: '.job-details-jobs-unified-top-card__bullet, .topcard__flavor--bullet',
-    salary: '.salary-main-rail-card__salary-range, .compensation__salary',
-    description: '.jobs-description__content, .description__text',
+    company: '.job-details-jobs-unified-top-card__company-name a, .topcard__org-name-link, .jobs-details-top-card__company-name, [data-test-id="job-poster-name"]',
+    position: '.job-details-jobs-unified-top-card__job-title h1, .topcard__title, .jobs-details-top-card__job-title, h1.job-details-jobs-unified-top-card__job-title',
+    location: '.job-details-jobs-unified-top-card__bullet, .topcard__flavor--bullet, .jobs-details-top-card__bullet, .job-details-jobs-unified-top-card__primary-description-without-tagline',
+    salary: '.salary-main-rail-card__salary-range, .compensation__salary, .job-details-jobs-unified-top-card__job-insight',
+    description: '.jobs-description__content, .description__text, .jobs-description-content__text, .jobs-box__html-content',
   },
   'indeed.com': {
     company: '[data-testid="company-name"], .jobsearch-InlineCompanyRating > div:first-child',
@@ -62,16 +42,14 @@ const SITE_SELECTORS = {
 
 // Job capture class
 class JobCapture {
-  private startTime: number;
-  private currentJob: JobDetails | null = null;
-  private observer: MutationObserver | null = null;
-
   constructor() {
     this.startTime = Date.now();
+    this.currentJob = null;
+    this.observer = null;
     this.init();
   }
 
-  private init() {
+  init() {
     // Listen for messages from popup or background
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (request.action === 'captureJob') {
@@ -81,6 +59,17 @@ class JobCapture {
       
       if (request.action === 'getJobDetails') {
         sendResponse(this.currentJob);
+      }
+
+      if (request.action === 'getToken') {
+        // Return token from localStorage if on frontend domain
+        try {
+          const token = localStorage.getItem('token');
+          sendResponse({ token: token || null });
+        } catch (e) {
+          sendResponse({ token: null });
+        }
+        return true;
       }
 
       if (request.action === 'startTracking') {
@@ -99,22 +88,32 @@ class JobCapture {
     this.observePageChanges();
   }
 
-  private detectJobPage() {
+  detectJobPage() {
     const url = window.location.href;
-    const isJobPage = 
-      url.includes('/jobs/view/') ||
-      url.includes('/viewjob') ||
-      url.includes('/job/') ||
-      url.includes('/jobs/') ||
-      url.includes('/rc/clk');
+    // Only capture on actual job detail pages, NOT listing pages
+    const isJobDetailPage = 
+      url.includes('/jobs/view/') ||  // LinkedIn: https://linkedin.com/jobs/view/123456
+      url.match(/\/jobs\/collections\/.*\?currentJobId=\d+/) || // LinkedIn collections with job ID
+      url.includes('/viewjob') ||  // Indeed old format
+      url.match(/\/job\/\d+/) ||  // Indeed: /job/123456
+      url.includes('/rc/clk') ||  // Indeed redirect
+      url.match(/\/jobs\/search\/.*\?currentJobId=\d+/) || // LinkedIn search with job ID
+      (url.includes('/job/') && !url.includes('/jobs/')); // Other sites: /job/123
 
-    if (isJobPage) {
+    if (isJobDetailPage) {
+      console.log('✅ UK Job Tracker: Detected job detail page:', url);
       // Wait for page to load then capture
-      setTimeout(() => this.captureCurrentJob(), 1500);
+      setTimeout(() => this.captureCurrentJob(), 2000);
+    } else {
+      // Check if we're on LinkedIn jobs listing
+      if (url.includes('linkedin.com/jobs') && !url.includes('/view/') && !url.includes('currentJobId=')) {
+        this.showNotification('📋 Tip: Click on any job to open details - extension will auto-capture!', 'info');
+      }
+      console.log('ℹ️ UK Job Tracker: On listing page. 💡 CLICK on a job to open detail page - extension will auto-capture!');
     }
   }
 
-  private observePageChanges() {
+  observePageChanges() {
     // Observe URL changes for SPAs
     let lastUrl = location.href;
     this.observer = new MutationObserver(() => {
@@ -131,21 +130,36 @@ class JobCapture {
     });
   }
 
-  private async captureCurrentJob(): Promise<CaptureResult> {
+  async captureCurrentJob() {
     try {
+      console.log('🔍 UK Job Tracker: Starting job capture...', window.location.href);
       const hostname = window.location.hostname;
       const selectors = this.getSelectorsForSite(hostname);
 
       if (!selectors) {
-        // Try generic capture
+        console.warn('⚠️ UK Job Tracker: No specific selectors found, using generic capture');
         return this.genericCapture();
       }
 
-      const jobDetails: JobDetails = {
-        company: this.extractText(selectors.company) || '',
-        position: this.extractText(selectors.position) || '',
-        location: this.extractText(selectors.location),
-        salary: this.extractText(selectors.salary),
+      console.log('✅ UK Job Tracker: Found selectors for:', hostname);
+
+      const companyText = this.extractText(selectors.company);
+      const positionText = this.extractText(selectors.position);
+      const locationText = this.extractText(selectors.location);
+      const salaryText = this.extractText(selectors.salary);
+
+      console.log('📋 UK Job Tracker: Captured data:', {
+        company: companyText || '(not found)',
+        position: positionText || '(not found)',
+        location: locationText || '(not found)',
+        salary: salaryText || '(not found)'
+      });
+
+      const jobDetails = {
+        company: companyText || '',
+        position: positionText || '',
+        location: locationText,
+        salary: salaryText,
         jobUrl: window.location.href,
         jobBoardSource: this.getSourceName(hostname),
         description: this.extractText(selectors.description),
@@ -156,7 +170,7 @@ class JobCapture {
 
       // Validate captured data
       if (!jobDetails.company || !jobDetails.position) {
-        // Try fallback methods
+        console.warn('⚠️ UK Job Tracker: Missing company or position, trying fallback...');
         return this.fallbackCapture(jobDetails);
       }
 
@@ -164,25 +178,25 @@ class JobCapture {
       
       // Store in local storage
       await this.storeJobLocally(jobDetails);
+      console.log('💾 UK Job Tracker: Job stored locally. Details:', jobDetails);
 
       // Show success notification
-      this.showNotification('Job details captured successfully!', 'success');
+      this.showNotification('✅ Job details captured successfully!', 'success');
 
-      return {
-        success: true,
-        data: jobDetails,
-      };
+      // Try to send to backend
+      this.sendToBackend(jobDetails).catch(err => {
+        console.warn('⚠️ UK Job Tracker: Backend save failed (will sync later):', err);
+      });
+
+      return { success: true, data: jobDetails };
 
     } catch (error) {
-      console.error('Error capturing job:', error);
-      return {
-        success: false,
-        error: error.message,
-      };
+      console.error('❌ UK Job Tracker: Error capturing job:', error);
+      return { success: false, error: (error && error.message) || 'Unknown error' };
     }
   }
 
-  private getSelectorsForSite(hostname: string): any {
+  getSelectorsForSite(hostname) {
     for (const [domain, selectors] of Object.entries(SITE_SELECTORS)) {
       if (hostname.includes(domain)) {
         return selectors;
@@ -191,21 +205,21 @@ class JobCapture {
     return null;
   }
 
-  private extractText(selector: string | undefined): string | undefined {
+  extractText(selector) {
     if (!selector) return undefined;
 
     const selectors = selector.split(', ');
     for (const sel of selectors) {
       const element = document.querySelector(sel);
       if (element) {
-        const text = element.textContent?.trim();
+        const text = (element.textContent || '').trim();
         if (text) return text;
       }
     }
     return undefined;
   }
 
-  private getSourceName(hostname: string): string {
+  getSourceName(hostname) {
     if (hostname.includes('linkedin')) return 'LinkedIn';
     if (hostname.includes('indeed')) return 'Indeed';
     if (hostname.includes('reed')) return 'Reed';
@@ -215,9 +229,9 @@ class JobCapture {
     return hostname;
   }
 
-  private async genericCapture(): Promise<CaptureResult> {
+  async genericCapture() {
     // Use AI-like heuristics to find job details
-    const jobDetails: JobDetails = {
+    const jobDetails = {
       company: this.findByPatterns(['company', 'employer', 'organization']) || '',
       position: this.findByPatterns(['title', 'position', 'role', 'job']) || '',
       location: this.findByPatterns(['location', 'city', 'remote']),
@@ -230,24 +244,18 @@ class JobCapture {
     };
 
     if (jobDetails.company && jobDetails.position) {
-      return {
-        success: true,
-        data: jobDetails,
-      };
+      return { success: true, data: jobDetails };
     }
 
-    return {
-      success: false,
-      error: 'Unable to capture job details from this page',
-    };
+    return { success: false, error: 'Unable to capture job details from this page' };
   }
 
-  private findByPatterns(patterns: string[]): string | undefined {
+  findByPatterns(patterns) {
     for (const pattern of patterns) {
       // Search for elements containing these keywords
       const elements = document.querySelectorAll(`[class*="${pattern}"], [id*="${pattern}"], [data-*="${pattern}"]`);
       for (const element of elements) {
-        const text = element.textContent?.trim();
+        const text = (element.textContent || '').trim();
         if (text && text.length > 2 && text.length < 200) {
           return text;
         }
@@ -256,10 +264,10 @@ class JobCapture {
       // Search headings
       const headings = document.querySelectorAll('h1, h2, h3');
       for (const heading of headings) {
-        if (heading.textContent?.toLowerCase().includes(pattern)) {
+        if ((heading.textContent || '').toLowerCase().includes(pattern)) {
           const nextElement = heading.nextElementSibling;
           if (nextElement) {
-            const text = nextElement.textContent?.trim();
+            const text = (nextElement.textContent || '').trim();
             if (text) return text;
           }
         }
@@ -268,10 +276,12 @@ class JobCapture {
     return undefined;
   }
 
-  private async fallbackCapture(partialData: JobDetails): Promise<CaptureResult> {
+  async fallbackCapture(partialData) {
     // Try OpenGraph meta tags
-    const ogTitle = document.querySelector('meta[property="og:title"]')?.getAttribute('content');
-    const ogDescription = document.querySelector('meta[property="og:description"]')?.getAttribute('content');
+    const ogTitleEl = document.querySelector('meta[property="og:title"]');
+    const ogDescEl = document.querySelector('meta[property="og:description"]');
+    const ogTitle = ogTitleEl ? ogTitleEl.getAttribute('content') : null;
+    const ogDescription = ogDescEl ? ogDescEl.getAttribute('content') : null;
 
     if (ogTitle) {
       // Parse title which often contains "Position at Company"
@@ -286,19 +296,13 @@ class JobCapture {
     partialData.confidence = 0.8;
 
     if (partialData.company && partialData.position) {
-      return {
-        success: true,
-        data: partialData,
-      };
+      return { success: true, data: partialData };
     }
 
-    return {
-      success: false,
-      error: 'Insufficient job details captured',
-    };
+    return { success: false, error: 'Insufficient job details captured' };
   }
 
-  private async storeJobLocally(jobDetails: JobDetails) {
+  async storeJobLocally(jobDetails) {
     // Store in Chrome storage for offline sync
     const stored = await chrome.storage.local.get(['capturedJobs']) || {};
     const jobs = stored.capturedJobs || [];
@@ -310,27 +314,92 @@ class JobCapture {
     }
 
     await chrome.storage.local.set({ capturedJobs: jobs });
+    console.log('💾 UK Job Tracker: Saved to local storage. Total jobs:', jobs.length);
   }
 
-  private showNotification(message: string, type: 'success' | 'error' | 'info' = 'info') {
-    // Create and inject notification element
-    const notification = document.createElement('div');
-    notification.className = `ukji-notification ukji-notification-${type}`;
-    notification.textContent = message;
-    notification.style.cssText = `
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      padding: 12px 20px;
-      background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : '#3b82f6'};
-      color: white;
-      border-radius: 8px;
-      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-      z-index: 999999;
-      font-family: system-ui, -apple-system, sans-serif;
-      font-size: 14px;
-      animation: slideIn 0.3s ease-out;
-    `;
+  async sendToBackend(jobDetails) {
+    try {
+      // Get auth token from chrome storage
+      let { token } = await chrome.storage.local.get(['token']);
+      
+      // If no token in chrome storage, try to get from page localStorage (for frontend domain)
+      if (!token && window.location.hostname === 'localhost' && window.location.port === '3000') {
+        try {
+          token = localStorage.getItem('token');
+          if (token) {
+            await chrome.storage.local.set({ token });
+            console.log('✅ UK Job Tracker: Token synced from page localStorage');
+          }
+        } catch (e) {
+          // Can't access localStorage from content script in some contexts
+        }
+      }
+      
+      if (!token) {
+        console.warn('⚠️ UK Job Tracker: No auth token found. Please:');
+        console.warn('   1. Login at http://localhost:3000');
+        console.warn('   2. Open extension popup to sync token');
+        console.warn('   3. Jobs will sync to backend automatically');
+        return;
+      }
+
+      console.log('🚀 UK Job Tracker: Sending to backend...');
+      
+      const response = await fetch('http://localhost:3001/api/applications', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          company: jobDetails.company,
+          position: jobDetails.position,
+          location: jobDetails.location,
+          jobUrl: jobDetails.jobUrl,
+          jobBoardSource: jobDetails.jobBoardSource,
+          salary: jobDetails.salary,
+          status: 'APPLIED',
+          captureMethod: 'EXTENSION'
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Backend returned ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('✅ UK Job Tracker: Successfully saved to backend!', result);
+      this.showNotification('✅ Saved to database!', 'success');
+    } catch (error) {
+      console.error('❌ UK Job Tracker: Backend save error:', error);
+      throw error;
+    }
+  }
+
+      showNotification(message, type = 'info') {
+        // Create and inject notification element
+        const notification = document.createElement('div');
+        notification.className = `ukji-notification ukji-notification-${type}`;
+        notification.textContent = message;
+        const bgColor = type === 'success' ? '#10b981' : 
+                        type === 'error' ? '#ef4444' : 
+                        type === 'info' ? '#3b82f6' : '#6366f1';
+        notification.style.cssText = `
+          position: fixed;
+          top: 20px;
+          right: 20px;
+          padding: 14px 20px;
+          background: ${bgColor};
+          color: white;
+          border-radius: 8px;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+          z-index: 999999;
+          font-family: system-ui, -apple-system, sans-serif;
+          font-size: 14px;
+          font-weight: 500;
+          max-width: 400px;
+          animation: slideIn 0.3s ease-out;
+        `;
 
     document.body.appendChild(notification);
 
@@ -341,19 +410,19 @@ class JobCapture {
     }, 3000);
   }
 
-  private startTimeTracking() {
+  startTimeTracking() {
     this.startTime = Date.now();
     chrome.storage.local.set({ trackingStartTime: this.startTime });
   }
 
-  private stopTimeTracking(): number {
+  stopTimeTracking() {
     const endTime = Date.now();
     const timeSpent = Math.floor((endTime - this.startTime) / 1000); // in seconds
     chrome.storage.local.remove(['trackingStartTime']);
     return timeSpent;
   }
 
-  public destroy() {
+  destroy() {
     if (this.observer) {
       this.observer.disconnect();
     }
@@ -389,8 +458,3 @@ style.textContent = `
   }
 `;
 document.head.appendChild(style);
-
-// Export for testing
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { JobCapture };
-}

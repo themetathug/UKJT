@@ -27,8 +27,19 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/jobtracker
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: jobtracker
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: jobtracker
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
       NODE_ENV: development
       PORT: 3001
+      ALLOWED_ORIGINS: http://localhost:3000
     ports:
       - "3001:3001"
     volumes:

@@ -10,15 +10,22 @@ chrome.runtime.onInstalled.addListener(() => {
     autoCapture: true,
     syncEnabled: false,
   });
+  
+  console.log('Extension installed successfully');
 });
 
 // Listen for messages from content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'saveApplication') {
     // Handle application save
-    saveApplication(request.data)
-      .then(result => sendResponse({ success: true, result }))
-      .catch(error => sendResponse({ success: false, error: error.message }));
+    (async () => {
+      try {
+        const result = await saveApplication(request.data);
+        sendResponse({ success: true, result });
+      } catch (error) {
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
     return true; // Keep channel open for async response
   }
   
@@ -132,4 +139,5 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 });
 
 console.log('Background service worker loaded');
+console.log('Extension ready for job tracking!');
 

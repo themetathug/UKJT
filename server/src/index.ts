@@ -16,6 +16,7 @@ import applicationsRouter from './routes/applications.routes';
 import analyticsRouter from './routes/analytics.routes';
 import mlAnalyticsRouter from './routes/ml-analytics.routes';
 import userRouter from './routes/user.routes';
+import coldEmailsRouter from './routes/cold-emails.routes';
 
 // Import middleware
 import { errorHandler } from './middleware/error.middleware';
@@ -80,6 +81,7 @@ app.get('/health', (req, res) => {
 // API Routes
 app.use('/api/auth', authRouter);
 app.use('/api/applications', authMiddleware, applicationsRouter);
+app.use('/api/cold-emails', authMiddleware, coldEmailsRouter);
 app.use('/api/analytics', authMiddleware, analyticsRouter);
 app.use('/api/ml-analytics', authMiddleware, mlAnalyticsRouter);
 app.use('/api/users', authMiddleware, userRouter);

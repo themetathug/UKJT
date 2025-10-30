@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { prisma } from '../database/client';
+import { pool } from '../database/client';
 import { logger } from '../utils/logger';
 
 interface JwtPayload {
@@ -42,39 +42,27 @@ export async function authMiddleware(
       process.env.JWT_SECRET || 'development-secret'
     ) as JwtPayload;
 
-    // Check if session exists
-    const session = await prisma.session.findUnique({
-      where: { token },
-      include: {
-        user: {
-          select: {
-            id: true,
-            email: true,
-            subscription: true,
-          },
-        },
-      },
-    });
+    // Verify user exists in database
+    const result = await pool.query(
+      'SELECT id, email, subscription FROM users WHERE id = $1',
+      [decoded.userId]
+    );
 
-    if (!session || session.expiresAt < new Date()) {
+    if (result.rows.length === 0) {
       return res.status(401).json({
-        error: 'Session expired',
-        message: 'Your session has expired. Please login again.',
+        error: 'Invalid token',
+        message: 'User not found.',
       });
     }
 
+    const user = result.rows[0];
+
     // Attach user to request
     req.user = {
-      id: decoded.userId,
-      email: session.user.email,
-      subscription: session.user.subscription,
+      id: user.id,
+      email: user.email,
+      subscription: user.subscription,
     };
-
-    // Update last active time
-    await prisma.user.update({
-      where: { id: decoded.userId },
-      data: { lastActiveAt: new Date() },
-    });
 
     next();
   } catch (error) {
@@ -119,24 +107,17 @@ export async function optionalAuthMiddleware(
       process.env.JWT_SECRET || 'development-secret'
     ) as JwtPayload;
 
-    const session = await prisma.session.findUnique({
-      where: { token },
-      include: {
-        user: {
-          select: {
-            id: true,
-            email: true,
-            subscription: true,
-          },
-        },
-      },
-    });
+    const result = await pool.query(
+      'SELECT id, email, subscription FROM users WHERE id = $1',
+      [decoded.userId]
+    );
 
-    if (session && session.expiresAt >= new Date()) {
+    if (result.rows.length > 0) {
+      const user = result.rows[0];
       req.user = {
-        id: decoded.userId,
-        email: session.user.email,
-        subscription: session.user.subscription,
+        id: user.id,
+        email: user.email,
+        subscription: user.subscription,
       };
     }
   } catch (error) {

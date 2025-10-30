@@ -27,9 +27,112 @@ document.addEventListener('DOMContentLoaded', async () => {
   let timerInterval = null;
   let startTime = null;
   
+  // Sync auth token from frontend localStorage
+  async function syncAuthToken() {
+    try {
+      // Method 1: Try to get token from the frontend app tab
+      const tabs = await chrome.tabs.query({ url: '*://localhost:3000/*' });
+      if (tabs.length > 0) {
+        try {
+          // Inject script to read localStorage
+          const results = await chrome.scripting.executeScript({
+            target: { tabId: tabs[0].id },
+            func: () => {
+              try {
+                return localStorage.getItem('token');
+              } catch (e) {
+                return null;
+              }
+            }
+          });
+          
+          if (results && results[0] && results[0].result) {
+            const token = results[0].result;
+            if (token && token !== 'null' && token !== 'undefined' && token.length > 10) {
+              await chrome.storage.local.set({ token });
+              console.log('✅ Token synced to extension from frontend tab');
+              return true;
+            }
+          }
+        } catch (e) {
+          console.log('⚠️ Could not inject script, trying message passing...', e.message);
+        }
+      }
+      
+      // Method 2: Send message to content script on frontend tab
+      if (tabs.length > 0) {
+        try {
+          const response = await new Promise((resolve) => {
+            chrome.tabs.sendMessage(tabs[0].id, { action: 'getToken' }, (response) => {
+              resolve(response);
+            });
+          });
+          
+          if (response && response.token && response.token !== 'null' && response.token.length > 10) {
+            await chrome.storage.local.set({ token: response.token });
+            console.log('✅ Token synced via message');
+            return true;
+          }
+        } catch (e) {
+          console.log('⚠️ Content script not loaded, will sync on next page load');
+        }
+      }
+      
+      return false;
+    } catch (error) {
+      console.log('⚠️ Could not sync token:', error.message);
+      return false;
+    }
+  }
+
+  // Show token status
+  async function showTokenStatus() {
+    const tokenStatus = document.getElementById('token-status');
+    const { token } = await chrome.storage.local.get(['token']);
+    
+    if (token && token !== 'null' && token.length > 10) {
+      tokenStatus.textContent = '✅ Authenticated - Ready to save jobs!';
+      tokenStatus.className = 'status success';
+      tokenStatus.classList.remove('hidden');
+    } else {
+      tokenStatus.textContent = '⚠️ Not authenticated - Click "Sync Token" button below';
+      tokenStatus.className = 'status error';
+      tokenStatus.classList.remove('hidden');
+    }
+  }
+
+  // Manual token sync button handler
+  async function handleSyncToken() {
+    const tokenStatus = document.getElementById('token-status');
+    const successMessage = document.getElementById('success-message');
+    
+    tokenStatus.textContent = '🔄 Syncing token...';
+    tokenStatus.className = 'status info';
+    tokenStatus.classList.remove('hidden');
+    
+    const synced = await syncAuthToken();
+    
+    if (synced) {
+      tokenStatus.textContent = '✅ Token synced successfully!';
+      tokenStatus.className = 'status success';
+      successMessage.textContent = '✅ Authentication token synced! You can now save jobs.';
+      successMessage.classList.remove('hidden');
+      setTimeout(() => successMessage.classList.add('hidden'), 3000);
+    } else {
+      tokenStatus.textContent = '❌ Failed to sync token. Make sure you are logged in at localhost:3000';
+      tokenStatus.className = 'status error';
+    }
+  }
+
   // Load current tab and try to capture job
   async function initialize() {
     try {
+      // Show token status
+      await showTokenStatus();
+      
+      // Sync token first
+      await syncAuthToken();
+      
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       
       if (!tab) {
@@ -213,6 +316,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     startTimerBtn.disabled = false;
     stopTimerBtn.disabled = true;
   });
+
+  // Sync token button (if it exists)
+  const syncTokenBtn = document.getElementById('sync-token-btn');
+  if (syncTokenBtn) {
+    syncTokenBtn.addEventListener('click', handleSyncToken);
+  }
   
   // Initialize popup
   initialize();

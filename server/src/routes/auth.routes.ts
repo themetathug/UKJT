@@ -1,12 +1,10 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 import { z } from 'zod';
-import { prisma } from '../database/client';
+import { pool } from '../database/client';
 import { logger } from '../utils/logger';
 import { validateRequest } from '../middleware/validation.middleware';
 import { generateToken, verifyToken } from '../utils/jwt.utils';
-import { redisClient } from '../services/redis.service';
 
 const router = Router();
 
@@ -28,14 +26,19 @@ const loginSchema = z.object({
 // Register endpoint
 router.post('/register', validateRequest(registerSchema), async (req, res) => {
   try {
-    const { email, password, firstName, lastName, consentTracking, consentAnalytics } = req.body;
+    const { email, password, firstName, lastName } = req.body;
 
     // Check if user exists
-    const existingUser = await prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
-    });
+    const existingUserResult = await pool.query(
+      'SELECT id FROM users WHERE email = $1',
+      [email.toLowerCase()]
+    );
 
-    if (existingUser) {
+    if (!existingUserResult || !existingUserResult.rows) {
+      throw new Error('Database query failed - invalid result structure');
+    }
+
+    if (existingUserResult.rows.length > 0) {
       return res.status(400).json({
         error: 'User already exists',
         message: 'An account with this email already exists',
@@ -47,59 +50,52 @@ router.post('/register', validateRequest(registerSchema), async (req, res) => {
     const passwordHash = await bcrypt.hash(password, salt);
 
     // Create user
-    const user = await prisma.user.create({
-      data: {
-        email: email.toLowerCase(),
+    const result = await pool.query(
+      `INSERT INTO users (email, password_hash, first_name, last_name, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, NOW(), NOW())
+       RETURNING id, email, first_name, last_name, subscription, created_at`,
+      [
+        email.toLowerCase(),
         passwordHash,
-        firstName,
-        lastName,
-        consentTracking,
-        consentAnalytics,
-        profileData: {
-          onboardingCompleted: false,
-          preferredJobBoards: [],
-          skills: [],
-        },
-      },
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        subscription: true,
-        createdAt: true,
-      },
-    });
+        firstName || null,
+        lastName || null,
+      ]
+    );
+
+    if (!result || !result.rows || result.rows.length === 0) {
+      throw new Error('Failed to create user - no data returned from database');
+    }
+
+    const user = result.rows[0];
+
+    if (!user || !user.id) {
+      throw new Error('Invalid user data returned from database');
+    }
 
     // Generate token
     const token = generateToken(user.id);
-
-    // Create session
-    await prisma.session.create({
-      data: {
-        userId: user.id,
-        token,
-        userAgent: req.headers['user-agent'] || '',
-        ipAddress: req.ip || '',
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-      },
-    });
-
-    // Cache session in Redis
-    await redisClient.set(`session:${token}`, user.id, 'EX', 7 * 24 * 60 * 60);
 
     logger.info(`New user registered: ${user.email}`);
 
     res.status(201).json({
       message: 'Account created successfully',
-      user,
+      user: {
+        id: user.id,
+        email: user.email,
+        firstName: user.first_name,
+        lastName: user.last_name,
+        subscription: user.subscription,
+        createdAt: user.created_at,
+      },
       token,
     });
-  } catch (error) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     logger.error('Registration error:', error);
     res.status(500).json({
       error: 'Registration failed',
       message: 'Unable to create account. Please try again.',
+      details: process.env.NODE_ENV === 'development' ? errorMessage : undefined,
     });
   }
 });
@@ -110,31 +106,28 @@ router.post('/login', validateRequest(loginSchema), async (req, res) => {
     const { email, password } = req.body;
 
     // Find user
-    const user = await prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
-      select: {
-        id: true,
-        email: true,
-        passwordHash: true,
-        firstName: true,
-        lastName: true,
-        subscription: true,
-        weeklyTarget: true,
-        monthlyTarget: true,
-        consentTracking: true,
-        consentAnalytics: true,
-      },
-    });
+    const result = await pool.query(
+      `SELECT id, email, password_hash, first_name, last_name, subscription, weekly_target, monthly_target
+       FROM users
+       WHERE email = $1`,
+      [email.toLowerCase()]
+    );
 
-    if (!user) {
+    if (!result || !result.rows || result.rows.length === 0) {
       return res.status(401).json({
         error: 'Invalid credentials',
         message: 'Email or password is incorrect',
       });
     }
 
+    const user = result.rows[0];
+
+    if (!user || !user.id || !user.password_hash) {
+      throw new Error('Invalid user data returned from database');
+    }
+
     // Verify password
-    const isValid = await bcrypt.compare(password, user.passwordHash);
+    const isValid = await bcrypt.compare(password, user.password_hash);
     if (!isValid) {
       return res.status(401).json({
         error: 'Invalid credentials',
@@ -145,70 +138,37 @@ router.post('/login', validateRequest(loginSchema), async (req, res) => {
     // Generate token
     const token = generateToken(user.id);
 
-    // Create session
-    await prisma.session.create({
-      data: {
-        userId: user.id,
-        token,
-        userAgent: req.headers['user-agent'] || '',
-        ipAddress: req.ip || '',
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      },
-    });
-
-    // Update last active
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { lastActiveAt: new Date() },
-    });
-
-    // Cache session in Redis
-    await redisClient.set(`session:${token}`, user.id, 'EX', 7 * 24 * 60 * 60);
-
-    // Remove password from response
-    const { passwordHash: _, ...userWithoutPassword } = user;
-
     logger.info(`User logged in: ${user.email}`);
 
     res.json({
       message: 'Login successful',
-      user: userWithoutPassword,
+      user: {
+        id: user.id,
+        email: user.email,
+        firstName: user.first_name,
+        lastName: user.last_name,
+        subscription: user.subscription,
+        weeklyTarget: user.weekly_target,
+        monthlyTarget: user.monthly_target,
+      },
       token,
     });
-  } catch (error) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     logger.error('Login error:', error);
     res.status(500).json({
       error: 'Login failed',
       message: 'Unable to login. Please try again.',
+      details: process.env.NODE_ENV === 'development' ? errorMessage : undefined,
     });
   }
 });
 
 // Logout endpoint
-router.post('/logout', async (req, res) => {
-  try {
-    const token = req.headers.authorization?.replace('Bearer ', '');
-
-    if (token) {
-      // Remove session from database
-      await prisma.session.deleteMany({
-        where: { token },
-      });
-
-      // Remove from Redis
-      await redisClient.del(`session:${token}`);
-    }
-
-    res.json({
-      message: 'Logged out successfully',
-    });
-  } catch (error) {
-    logger.error('Logout error:', error);
-    res.status(500).json({
-      error: 'Logout failed',
-      message: 'Unable to logout. Please try again.',
-    });
-  }
+router.post('/logout', async (_req, res) => {
+  res.json({
+    message: 'Logged out successfully',
+  });
 });
 
 // Refresh token endpoint
@@ -232,34 +192,8 @@ router.post('/refresh', async (req, res) => {
       });
     }
 
-    // Check session in database
-    const session = await prisma.session.findUnique({
-      where: { token },
-      include: { user: true },
-    });
-
-    if (!session || session.expiresAt < new Date()) {
-      return res.status(401).json({
-        error: 'Session expired',
-        message: 'Please login again',
-      });
-    }
-
     // Generate new token
-    const newToken = generateToken(session.userId);
-
-    // Update session
-    await prisma.session.update({
-      where: { id: session.id },
-      data: {
-        token: newToken,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      },
-    });
-
-    // Update Redis
-    await redisClient.del(`session:${token}`);
-    await redisClient.set(`session:${newToken}`, session.userId, 'EX', 7 * 24 * 60 * 60);
+    const newToken = generateToken(payload.userId);
 
     res.json({
       message: 'Token refreshed successfully',
@@ -272,18 +206,6 @@ router.post('/refresh', async (req, res) => {
       message: 'Unable to refresh token. Please login again.',
     });
   }
-});
-
-// Verify email endpoint
-router.get('/verify-email/:token', async (req, res) => {
-  // Implementation for email verification
-  res.json({ message: 'Email verification endpoint - To be implemented' });
-});
-
-// Password reset request
-router.post('/forgot-password', async (req, res) => {
-  // Implementation for password reset
-  res.json({ message: 'Password reset endpoint - To be implemented' });
 });
 
 export default router;
