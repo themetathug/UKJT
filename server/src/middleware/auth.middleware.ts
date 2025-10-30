@@ -39,7 +39,11 @@ export async function authMiddleware(
     // Verify JWT token
     const decoded = jwt.verify(
       token,
-      process.env.JWT_SECRET || 'development-secret'
+      process.env.JWT_SECRET || 'development-secret-key',
+      {
+        issuer: 'uk-jobs-insider',
+        audience: 'job-tracker',
+      }
     ) as JwtPayload;
 
     // Verify user exists in database
@@ -104,7 +108,11 @@ export async function optionalAuthMiddleware(
   try {
     const decoded = jwt.verify(
       token,
-      process.env.JWT_SECRET || 'development-secret'
+      process.env.JWT_SECRET || 'development-secret-key',
+      {
+        issuer: 'uk-jobs-insider',
+        audience: 'job-tracker',
+      }
     ) as JwtPayload;
 
     const result = await pool.query(

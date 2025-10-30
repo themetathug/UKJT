@@ -27,6 +27,20 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   });
 
   if (!response.ok) {
+    // Handle 401 Unauthorized - token is invalid/expired
+    if (response.status === 401) {
+      // Clear invalid token
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('token');
+        // Redirect to login page if not already there
+        if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
+          window.location.href = '/login?expired=true';
+        }
+      }
+      const errorData = await response.json().catch(() => ({ message: 'Your session expired. Please login again.' }));
+      throw new Error(errorData.message || 'Your session expired. Please login again.');
+    }
+    
     const errorData = await response.json().catch(() => ({ message: 'Request failed' }));
     throw new Error(errorData.message || `HTTP ${response.status}`);
   }
