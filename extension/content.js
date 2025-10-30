@@ -81,6 +81,11 @@ class JobCapture {
         const timeSpent = this.stopTimeTracking();
         sendResponse({ timeSpent });
       }
+
+      if (request.action === 'captureMyJobs') {
+        this.captureLinkedInMyJobs().then(sendResponse);
+        return true; // Keep message channel open for async response
+      }
     });
 
     // Auto-detect when on a job page
@@ -90,6 +95,14 @@ class JobCapture {
 
   detectJobPage() {
     const url = window.location.href;
+    
+    // Check if on LinkedIn "My Jobs" page
+    if (url.includes('linkedin.com/my-items/') || url.includes('linkedin.com/jobs/collections/')) {
+      console.log('🎯 UK Job Tracker: LinkedIn My Jobs page detected!');
+      this.showNotification('📋 Open extension popup and click "Capture My Applied Jobs" to import your job list!', 'info');
+      return;
+    }
+    
     // Only capture on actual job detail pages, NOT listing pages
     const isJobDetailPage = 
       url.includes('/jobs/view/') ||  // LinkedIn: https://linkedin.com/jobs/view/123456
@@ -128,6 +141,161 @@ class JobCapture {
       childList: true,
       subtree: true,
     });
+  }
+
+  async captureLinkedInMyJobs() {
+    try {
+      console.log('🎯 UK Job Tracker: Capturing LinkedIn My Jobs list...');
+      this.showNotification('🔄 Scanning your applied jobs...', 'info');
+      
+      // Wait a moment for page to be fully loaded
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      const jobs = [];
+      
+      // LinkedIn My Jobs selectors (as of 2025)
+      const jobCards = document.querySelectorAll('[data-test-job-card], .jobs-search-results__list-item, .reusable-search__result-container, .scaffold-layout__list-item');
+      
+      console.log(`📋 Found ${jobCards.length} job cards on page`);
+      
+      if (jobCards.length === 0) {
+        this.showNotification('⚠️ No job cards found. Make sure you clicked "Applied" tab.', 'error');
+        return { success: false, error: 'No job cards found', count: 0 };
+      }
+      
+      for (const card of jobCards) {
+        try {
+          const company = card.querySelector('.job-card-container__primary-description, .job-card-list__company-name, [data-test-job-card-company-name]')?.textContent?.trim();
+          const position = card.querySelector('.job-card-list__title, .job-card-container__link, [data-test-job-card-title]')?.textContent?.trim();
+          const location = card.querySelector('.job-card-container__metadata-item, .job-card-list__footer-item, [data-test-job-card-location]')?.textContent?.trim();
+          
+          // Parse applied date from "Applied 23h ago", "Applied 1d ago", etc.
+          const appliedText = card.querySelector('[data-test-job-card-footer-time], .job-card-container__footer-time-badge, .job-card-list__footer-time-badge')?.textContent?.trim();
+          const appliedDate = this.parseAppliedDate(appliedText);
+          
+          if (company && position) {
+            jobs.push({
+              company: company,
+              position: position,
+              location: location || 'Not specified',
+              jobUrl: 'https://www.linkedin.com/jobs/', // Generic LinkedIn URL
+              jobBoardSource: 'LinkedIn',
+              status: 'APPLIED',
+              captureMethod: 'EXTENSION',
+              applied_at: appliedDate,
+            });
+          }
+        } catch (err) {
+          console.warn('⚠️ Error parsing job card:', err);
+        }
+      }
+      
+      if (jobs.length === 0) {
+        this.showNotification('⚠️ Could not extract job details. LinkedIn may have changed their layout.', 'error');
+        return { success: false, error: 'Could not extract job data', count: 0 };
+      }
+      
+      console.log(`✅ Captured ${jobs.length} jobs, sending to backend...`);
+      this.showNotification(`📤 Sending ${jobs.length} jobs to backend...`, 'info');
+      
+      // Send jobs in bulk to backend
+      await this.sendJobsBulkToBackend(jobs);
+      
+      this.showNotification(`✅ Successfully imported ${jobs.length} jobs!`, 'success');
+      return { success: true, count: jobs.length, jobs };
+      
+    } catch (error) {
+      console.error('❌ Error capturing My Jobs:', error);
+      this.showNotification(`❌ Error: ${error.message}`, 'error');
+      return { success: false, error: error.message, count: 0 };
+    }
+  }
+
+  parseAppliedDate(appliedText) {
+    if (!appliedText) return new Date().toISOString();
+    
+    const now = new Date();
+    
+    // Match patterns like "23h ago", "1d ago", "2w ago"
+    const match = appliedText.match(/(\d+)\s*(h|d|w|mo)/i);
+    if (match) {
+      const value = parseInt(match[1]);
+      const unit = match[2].toLowerCase();
+      
+      if (unit === 'h') {
+        now.setHours(now.getHours() - value);
+      } else if (unit === 'd') {
+        now.setDate(now.getDate() - value);
+      } else if (unit === 'w') {
+        now.setDate(now.getDate() - (value * 7));
+      } else if (unit === 'mo') {
+        now.setMonth(now.getMonth() - value);
+      }
+    }
+    
+    return now.toISOString();
+  }
+
+  async sendJobsBulkToBackend(jobs) {
+    try {
+      let token = null;
+      
+      // Get token from chrome storage
+      const storageResult = await chrome.storage.local.get(['token']);
+      token = storageResult.token;
+      
+      // If no token in storage, try page localStorage
+      if (!token) {
+        try {
+          token = localStorage.getItem('token');
+        } catch (e) {
+          console.warn('Cannot access localStorage from content script');
+        }
+      }
+      
+      if (!token) {
+        throw new Error('No auth token found. Please login and sync token via extension popup.');
+      }
+      
+      console.log('🚀 Sending bulk jobs to backend...');
+      
+      // Send jobs one by one (or implement a bulk endpoint)
+      let successCount = 0;
+      let failCount = 0;
+      
+      for (const job of jobs) {
+        try {
+          const response = await fetch('http://localhost:3001/api/applications', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+            body: JSON.stringify(job),
+          });
+          
+          if (response.ok) {
+            successCount++;
+          } else {
+            failCount++;
+            console.warn(`Failed to save job: ${job.position} at ${job.company}`);
+          }
+        } catch (err) {
+          failCount++;
+          console.error(`Error saving job: ${job.position}`, err);
+        }
+      }
+      
+      console.log(`✅ Bulk import complete: ${successCount} successful, ${failCount} failed`);
+      
+      if (failCount > 0) {
+        throw new Error(`${failCount} jobs failed to import`);
+      }
+      
+    } catch (error) {
+      console.error('❌ Bulk backend save error:', error);
+      throw error;
+    }
   }
 
   async captureCurrentJob() {

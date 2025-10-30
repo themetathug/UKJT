@@ -323,6 +323,41 @@ document.addEventListener('DOMContentLoaded', async () => {
     syncTokenBtn.addEventListener('click', handleSyncToken);
   }
   
+  // Capture My Applied Jobs button
+  const captureMyJobsBtn = document.getElementById('capture-my-jobs-btn');
+  if (captureMyJobsBtn) {
+    captureMyJobsBtn.addEventListener('click', async () => {
+      try {
+        captureMyJobsBtn.disabled = true;
+        captureMyJobsBtn.textContent = '⏳ Capturing...';
+        
+        // Send message to content script to capture LinkedIn My Jobs
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tabs.length === 0) {
+          showError('No active tab found');
+          return;
+        }
+        
+        const response = await chrome.tabs.sendMessage(tabs[0].id, { action: 'captureMyJobs' });
+        
+        if (response && response.success) {
+          showSuccess(`✅ Successfully imported ${response.count} jobs!`);
+          setTimeout(() => {
+            window.close();
+          }, 2000);
+        } else {
+          showError(response.error || 'Failed to capture jobs');
+        }
+      } catch (error) {
+        console.error('Error capturing My Jobs:', error);
+        showError('Make sure you are on LinkedIn My Jobs page and logged in');
+      } finally {
+        captureMyJobsBtn.disabled = false;
+        captureMyJobsBtn.textContent = '📥 Capture My Applied Jobs';
+      }
+    });
+  }
+  
   // Initialize popup
   initialize();
 });
