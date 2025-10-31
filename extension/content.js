@@ -4,11 +4,12 @@
 // Site-specific selectors for job boards
 const SITE_SELECTORS = {
   'linkedin.com': {
-    company: '.job-details-jobs-unified-top-card__company-name a, .topcard__org-name-link, .jobs-details-top-card__company-name, [data-test-id="job-poster-name"]',
-    position: '.job-details-jobs-unified-top-card__job-title h1, .topcard__title, .jobs-details-top-card__job-title, h1.job-details-jobs-unified-top-card__job-title',
-    location: '.job-details-jobs-unified-top-card__bullet, .topcard__flavor--bullet, .jobs-details-top-card__bullet, .job-details-jobs-unified-top-card__primary-description-without-tagline',
-    salary: '.salary-main-rail-card__salary-range, .compensation__salary, .job-details-jobs-unified-top-card__job-insight',
-    description: '.jobs-description__content, .description__text, .jobs-description-content__text, .jobs-box__html-content',
+    // Updated 2025 LinkedIn selectors - much more comprehensive
+    company: '.job-details-jobs-unified-top-card__company-name a, .job-details-jobs-unified-top-card__company-name, .topcard__org-name-link, .jobs-unified-top-card__company-name a, .jobs-unified-top-card__company-name, .t-black--light span, .jobs-company__box a, [data-job-details-company-link]',
+    position: '.job-details-jobs-unified-top-card__job-title, .job-details-jobs-unified-top-card__job-title h1, .topcard__title, .jobs-unified-top-card__job-title, .jobs-unified-top-card__job-title h2, h1.t-24, h2.t-24, .t-24.t-bold',
+    location: '.job-details-jobs-unified-top-card__primary-description, .job-details-jobs-unified-top-card__bullet, .topcard__flavor--bullet, .jobs-unified-top-card__bullet, .jobs-unified-top-card__workplace-type, .t-black--light.mt2 span',
+    salary: '.compensation__salary, .job-details-jobs-unified-top-card__job-insight, .job-details-salary',
+    description: '.jobs-description__content, .jobs-description-content__text, .show-more-less-html__markup, .jobs-box__html-content',
   },
   'indeed.com': {
     company: '[data-testid="company-name"], .jobsearch-InlineCompanyRating > div:first-child',
@@ -153,24 +154,24 @@ class JobCapture {
       
       const jobs = [];
       
-      // LinkedIn My Jobs selectors (as of 2025)
-      const jobCards = document.querySelectorAll('[data-test-job-card], .jobs-search-results__list-item, .reusable-search__result-container, .scaffold-layout__list-item');
+      // LinkedIn My Jobs selectors (Updated 2025)
+      const jobCards = document.querySelectorAll('[data-job-id], .job-card-container, .job-card-list, .jobs-search-results__list-item, .reusable-search__result-container, .scaffold-layout__list-item, .artdeco-list__item');
       
       console.log(`📋 Found ${jobCards.length} job cards on page`);
       
       if (jobCards.length === 0) {
-        this.showNotification('⚠️ No job cards found. Make sure you clicked "Applied" tab.', 'error');
+        this.showNotification('⚠️ No job cards found. Make sure you clicked "Applied" tab and scrolled to load all jobs.', 'error');
         return { success: false, error: 'No job cards found', count: 0 };
       }
       
       for (const card of jobCards) {
         try {
-          const company = card.querySelector('.job-card-container__primary-description, .job-card-list__company-name, [data-test-job-card-company-name]')?.textContent?.trim();
-          const position = card.querySelector('.job-card-list__title, .job-card-container__link, [data-test-job-card-title]')?.textContent?.trim();
-          const location = card.querySelector('.job-card-container__metadata-item, .job-card-list__footer-item, [data-test-job-card-location]')?.textContent?.trim();
+          const company = card.querySelector('.job-card-container__primary-description, .job-card-list__company-name, .artdeco-entity-lockup__subtitle, .t-black--light, [data-job-card-company-name]')?.textContent?.trim();
+          const position = card.querySelector('.job-card-list__title, .job-card-container__link, .artdeco-entity-lockup__title, .t-bold, [data-job-card-title], a.job-card-list__title')?.textContent?.trim();
+          const location = card.querySelector('.job-card-container__metadata-item, .job-card-list__footer-item, .artdeco-entity-lockup__caption, [data-job-card-location]')?.textContent?.trim();
           
           // Parse applied date from "Applied 23h ago", "Applied 1d ago", etc.
-          const appliedText = card.querySelector('[data-test-job-card-footer-time], .job-card-container__footer-time-badge, .job-card-list__footer-time-badge')?.textContent?.trim();
+          const appliedText = card.querySelector('[data-job-card-footer-time], .job-card-container__footer-time-badge, .job-card-list__footer-time-badge, .t-black--light.t-12 time, time')?.textContent?.trim();
           const appliedDate = this.parseAppliedDate(appliedText);
           
           if (company && position) {
