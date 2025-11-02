@@ -18,6 +18,7 @@ import mlAnalyticsRouter from './routes/ml-analytics.routes';
 import userRouter from './routes/user.routes';
 import coldEmailsRouter from './routes/cold-emails.routes';
 import scraperRouter from './routes/scraper.routes';
+import emailParserRouter from './routes/email-parser.routes';
 
 // Import middleware
 import { errorHandler } from './middleware/error.middleware';
@@ -126,6 +127,7 @@ app.use('/api/analytics', authMiddleware, analyticsRouter);
 app.use('/api/ml-analytics', authMiddleware, mlAnalyticsRouter);
 app.use('/api/users', authMiddleware, userRouter);
 app.use('/api/scraper', authMiddleware, scraperRouter);
+app.use('/api/email-parser', authMiddleware, emailParserRouter);
 
 // Error handling middleware (must be last)
 app.use(errorHandler);

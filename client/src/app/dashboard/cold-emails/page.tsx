@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { coldEmailsAPI } from '../../../lib/api';
+import { coldEmailsAPI, emailParserAPI } from '../../../lib/api';
 import { CustomCursor } from '../../../components/CustomCursor';
 import { ParticleBackground } from '../../../components/ParticleBackground';
 import { GlassCard } from '../../../components/GlassCard';
@@ -12,12 +12,23 @@ export default function ColdEmailsPage() {
   const [coldEmails, setColdEmails] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showParseModal, setShowParseModal] = useState(false);
+  const [parsing, setParsing] = useState(false);
   const [formData, setFormData] = useState({
     recipientEmail: '',
     recipientName: '',
     company: '',
     subject: '',
     message: '',
+  });
+  const [parseConfig, setParseConfig] = useState({
+    email: '',
+    password: '',
+    host: 'imap.gmail.com',
+    port: 993,
+    tls: true,
+    days: 7,
+    provider: 'gmail' as 'gmail' | 'outlook' | 'custom',
   });
 
   useEffect(() => {
@@ -83,6 +94,42 @@ export default function ColdEmailsPage() {
       fetchColdEmails();
     } catch (error: any) {
       toast.error('Failed to update');
+    }
+  };
+
+  const handleProviderChange = async (provider: 'gmail' | 'outlook' | 'custom') => {
+    if (provider === 'gmail') {
+      const config = await emailParserAPI.getGmailConfig();
+      setParseConfig({ ...parseConfig, provider, host: config.host, port: config.port, tls: config.tls });
+    } else if (provider === 'outlook') {
+      const config = await emailParserAPI.getOutlookConfig();
+      setParseConfig({ ...parseConfig, provider, host: config.host, port: config.port, tls: config.tls });
+    } else {
+      setParseConfig({ ...parseConfig, provider, host: '', port: 993 });
+    }
+  };
+
+  const handleParseEmails = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setParsing(true);
+    try {
+      const result = await emailParserAPI.parse({
+        email: parseConfig.email,
+        password: parseConfig.password,
+        host: parseConfig.host,
+        port: parseConfig.port,
+        tls: parseConfig.tls,
+        days: parseConfig.days,
+      });
+      
+      toast.success(`✅ Parsed ${result.count} job-related emails!`);
+      setShowParseModal(false);
+      setParseConfig({ ...parseConfig, password: '' }); // Clear password
+      fetchColdEmails();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to parse emails');
+    } finally {
+      setParsing(false);
     }
   };
 
@@ -161,13 +208,22 @@ export default function ColdEmailsPage() {
                 <h1 className="text-4xl font-bold text-black mb-2">Cold Email Tracking</h1>
                 <p className="text-gray-600">Track your networking emails and measure success</p>
               </div>
-              <button
-                onClick={() => setShowAddModal(true)}
-                className="px-6 py-3 bg-black text-white rounded-lg font-semibold hover:bg-gray-800 transition flex items-center space-x-2"
-              >
-                <span>📧</span>
-                <span>Log Cold Email</span>
-              </button>
+              <div className="flex space-x-3">
+                <button
+                  onClick={() => setShowParseModal(true)}
+                  className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition flex items-center space-x-2"
+                >
+                  <span>🔍</span>
+                  <span>Parse Emails</span>
+                </button>
+                <button
+                  onClick={() => setShowAddModal(true)}
+                  className="px-6 py-3 bg-black text-white rounded-lg font-semibold hover:bg-gray-800 transition flex items-center space-x-2"
+                >
+                  <span>📧</span>
+                  <span>Log Cold Email</span>
+                </button>
+              </div>
             </div>
 
             {/* Stats Cards */}
@@ -215,13 +271,29 @@ export default function ColdEmailsPage() {
                       <div className="flex-1">
                         <div className="flex items-center space-x-3 mb-2">
                           <h3 className="text-lg font-bold text-black">{email.recipient_name || email.recipient_email}</h3>
+                          {email.source === 'EMAIL_PARSED' && (
+                            <span className="px-2 py-1 bg-blue-600 text-white text-xs font-semibold rounded-full">📥 Parsed</span>
+                          )}
                           {email.responded && <span className="px-2 py-1 bg-green-600 text-white text-xs font-semibold rounded-full">✓ Responded</span>}
                         </div>
                         <div className="text-sm text-gray-600 space-y-1">
-                          <div>📧 {email.recipient_email}</div>
-                          {email.company && <div>🏢 {email.company}</div>}
-                          {email.subject && <div>📝 {email.subject}</div>}
-                          <div>📅 Sent: {new Date(email.sent_at).toLocaleDateString()}</div>
+                          <div>📧 {email.sender_email || email.recipient_email}</div>
+                          {email.position && (
+                            <div className="text-base font-semibold text-black">
+                              💼 Position: {email.position}
+                            </div>
+                          )}
+                          {email.company && <div>🏢 Company: {email.company}</div>}
+                          {email.location && <div>📍 Location: {email.location}</div>}
+                          {email.job_url && (
+                            <div>
+                              🔗 <a href={email.job_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                                Job Link
+                              </a>
+                            </div>
+                          )}
+                          {email.subject && <div>📝 Subject: {email.subject}</div>}
+                          <div>📅 {email.source === 'EMAIL_PARSED' ? 'Received' : 'Sent'}: {new Date(email.sent_at).toLocaleDateString()}</div>
                           {email.response_date && (
                             <div className="text-green-600 font-medium">
                               ✓ Responded: {new Date(email.response_date).toLocaleDateString()}
@@ -255,6 +327,127 @@ export default function ColdEmailsPage() {
             )}
           </GlassCard>
         </div>
+
+        {/* Parse Emails Modal */}
+        {showParseModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="bg-white rounded-2xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+            >
+              <h2 className="text-3xl font-bold text-black mb-6">Parse Job Emails</h2>
+              
+              <form onSubmit={handleParseEmails} className="space-y-4">
+                <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg mb-4">
+                  <p className="text-sm text-blue-700 dark:text-blue-300">
+                    <strong>📋 How it works:</strong>
+                    <br />
+                    Connect your email to automatically parse job-related emails from the last 7 days.
+                    The system will extract job positions, companies, locations, and URLs from your emails.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Email Provider</label>
+                  <select
+                    value={parseConfig.provider}
+                    onChange={(e) => handleProviderChange(e.target.value as 'gmail' | 'outlook' | 'custom')}
+                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-black focus:outline-none"
+                  >
+                    <option value="gmail">Gmail</option>
+                    <option value="outlook">Outlook</option>
+                    <option value="custom">Custom IMAP</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Email Address *</label>
+                  <input
+                    type="email"
+                    required
+                    value={parseConfig.email}
+                    onChange={(e) => setParseConfig({ ...parseConfig, email: e.target.value })}
+                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-black focus:outline-none"
+                    placeholder="your.email@gmail.com"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Password / App Password *</label>
+                  <input
+                    type="password"
+                    required
+                    value={parseConfig.password}
+                    onChange={(e) => setParseConfig({ ...parseConfig, password: e.target.value })}
+                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-black focus:outline-none"
+                    placeholder="Your email password or app password"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    For Gmail: Use an App Password (Settings → Security → 2-Step Verification → App Passwords)
+                  </p>
+                </div>
+
+                {parseConfig.provider === 'custom' && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">IMAP Host *</label>
+                      <input
+                        type="text"
+                        required={parseConfig.provider === 'custom'}
+                        value={parseConfig.host}
+                        onChange={(e) => setParseConfig({ ...parseConfig, host: e.target.value })}
+                        className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-black focus:outline-none"
+                        placeholder="imap.example.com"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Port *</label>
+                      <input
+                        type="number"
+                        required={parseConfig.provider === 'custom'}
+                        value={parseConfig.port}
+                        onChange={(e) => setParseConfig({ ...parseConfig, port: parseInt(e.target.value) })}
+                        className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-black focus:outline-none"
+                        placeholder="993"
+                      />
+                    </div>
+                  </>
+                )}
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Days to Parse</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="30"
+                    value={parseConfig.days}
+                    onChange={(e) => setParseConfig({ ...parseConfig, days: parseInt(e.target.value) })}
+                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-black focus:outline-none"
+                  />
+                </div>
+
+                <div className="flex space-x-4 pt-4">
+                  <button
+                    type="submit"
+                    disabled={parsing}
+                    className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition disabled:opacity-50"
+                  >
+                    {parsing ? 'Parsing...' : '🔍 Parse Emails'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowParseModal(false)}
+                    className="px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-lg font-semibold hover:border-black transition"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
 
         {/* Add Cold Email Modal */}
         {showAddModal && (

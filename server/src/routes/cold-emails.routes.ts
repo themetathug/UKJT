@@ -30,9 +30,14 @@ router.get('/', async (req, res) => {
     }
 
     const result = await pool.query(
-      `SELECT * FROM cold_emails 
+      `SELECT 
+         id, user_id, recipient_email, recipient_name, company, subject, message,
+         position, location, job_url, sender_email, source,
+         sent_at, response_date, responded, response_time_hours, conversion_status,
+         parsed_at, created_at, updated_at
+       FROM cold_emails 
        WHERE user_id = $1 
-       ORDER BY sent_at DESC 
+       ORDER BY sent_at DESC, created_at DESC
        LIMIT 100`,
       [userId]
     );

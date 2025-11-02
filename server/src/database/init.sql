@@ -77,6 +77,58 @@ BEGIN
   END IF;
 END $$;
 
+-- Add job-related fields to cold_emails table for parsed emails
+DO $$ 
+BEGIN
+  -- Add position/job title field
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'cold_emails' AND column_name = 'position'
+  ) THEN
+    ALTER TABLE cold_emails ADD COLUMN position VARCHAR(255);
+  END IF;
+  
+  -- Add location field
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'cold_emails' AND column_name = 'location'
+  ) THEN
+    ALTER TABLE cold_emails ADD COLUMN location VARCHAR(255);
+  END IF;
+  
+  -- Add job URL field
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'cold_emails' AND column_name = 'job_url'
+  ) THEN
+    ALTER TABLE cold_emails ADD COLUMN job_url TEXT;
+  END IF;
+  
+  -- Add source field (e.g., 'EMAIL_PARSED', 'MANUAL')
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'cold_emails' AND column_name = 'source'
+  ) THEN
+    ALTER TABLE cold_emails ADD COLUMN source VARCHAR(50) DEFAULT 'MANUAL';
+  END IF;
+  
+  -- Add sender email field (for incoming emails)
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'cold_emails' AND column_name = 'sender_email'
+  ) THEN
+    ALTER TABLE cold_emails ADD COLUMN sender_email VARCHAR(255);
+  END IF;
+  
+  -- Add parsed_at timestamp
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'cold_emails' AND column_name = 'parsed_at'
+  ) THEN
+    ALTER TABLE cold_emails ADD COLUMN parsed_at TIMESTAMP;
+  END IF;
+END $$;
+
 -- Create indexes
 CREATE INDEX IF NOT EXISTS idx_applications_user_id ON applications(user_id);
 CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(status);

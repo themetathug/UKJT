@@ -6,7 +6,7 @@ services:
     container_name: uk-job-tracker-db
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: Headboy123#
       POSTGRES_DB: jobtracker
     ports:
       - "5432:5432"
@@ -26,17 +26,17 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/jobtracker
+      DATABASE_URL: postgresql://postgres:Headboy123#@postgres:5432/jobtracker
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: jobtracker
       DB_USER: postgres
-      DB_PASSWORD: postgres
+      DB_PASSWORD: Headboy123#
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: jobtracker
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: Headboy123#
       NODE_ENV: development
       PORT: 3001
       JWT_SECRET: uk-job-tracker-secret-key-2025-production-safe
